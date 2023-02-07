@@ -53,7 +53,6 @@ def load_worksheet(path_credentials, doc_name, wks_name):
 def laod_user_id(sh):
     worksheet = sh.worksheet(USER_ID_WKS)
     user_ids = {}
-    #ignore header, assumes first col = id, second = user_name
     for index, user_id in enumerate(worksheet.col_values(1)[1:]):
         user_ids.update({int(user_id): worksheet.col_values(2)[1+index]})
     return user_ids
