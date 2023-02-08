@@ -13,6 +13,7 @@ LOG_PATH = 'log.txt'
 #sheet references
 GSDOC_NAME = "Gimnasio - Schedule"
 WKS_NAME = "Log"
+GSDOC_COPY_NAME = "Copia de Log"
 USER_ID_WKS = "Usuarios"
 EXE_INFO_WKS = "Ejercicios"
 
@@ -32,12 +33,22 @@ def login_mail(path_credentials = PATH_CREDENTIALS_MAIL):
         my_mail = imaplib.IMAP4_SSL('imap.gmail.com')
         # Log in using your credentials
         my_mail.login(user, password)
+        my_mail.select('Inbox', readonly = False)
         log_info("Login to mail OK", tabs=1)
     except:
         log_info("Loging to mail NOK", tabs=1)
         return False, None
 
     return my_mail, user
+
+def security_copy(wks, sh, wks_copy_name = GSDOC_COPY_NAME):
+    try:
+        wks_list = wks.get_all_values(value_render_option="UNFORMATTED_VALUE")
+        sh.values_update(wks_copy_name,
+            params={'valueInputOption': 'RAW'},body={'values':wks_list })
+        return True
+    except:
+        return False
 
 def load_worksheet(path_credentials=PATH_CREDENTIALS_GSPREAD, doc_name=GSDOC_NAME, wks_name=WKS_NAME):
     try:
@@ -82,23 +93,39 @@ def clean_json(input_string):
         return input_string[start_index:end_index + 1]
     return input_string
 
-def trainning_form_mail(messages):
+def trainning_form_mail(my_mail, last_date):
     training_msgs = {}
-    for msg in messages[::-1]:
+     #check inbox mails from same account
+    _, emailids = my_mail.search(None, "ALL") 
+    mail_id_list = emailids[0].split()  #IDs of all emails that we want to fetch 
+    #Iterate through messages and extract data into the msgs list
+    log_info(str(len(mail_id_list))+" mails found",tabs=1)
+    #filter trainnings from mails
+    remove_ids = mail_id_list.copy()
+    old_ids = mail_id_list.copy()
+    timestamp_last_date = datetime.strptime(last_date, "%d/%m/%Y")
+    for mail_id in mail_id_list:
+        typ, msg = my_mail.fetch(mail_id,'(RFC822)') #RFC822 returns whole message 
         for response_part in msg:
             if type(response_part) is tuple:
                 my_msg=email.message_from_bytes((response_part[1]))
                 for word_subject in my_msg['subject'].split():
                     #only keep messages with a "%d/%m/%Y" date on the subject
                     try:  
-                        datetime.strptime(word_subject, "%d/%m/%Y")
-                        for part in my_msg.walk():
-                            #extract text body fro mmail 
-                            if part.get_content_type() == 'text/plain':
-                                training_msgs.update({word_subject: json.loads(clean_json(part.get_payload()))})
-                                break
+                        mail_timestamp = datetime.strptime(word_subject, "%d/%m/%Y")
+                        remove_ids.remove(mail_id)                           
+                        if mail_timestamp > timestamp_last_date:
+                            # new data to load
+                            old_ids.remove(mail_id)
+                            for part in my_msg.walk():
+                                #extract text body fro mmail 
+                                if part.get_content_type() == 'text/plain':
+                                    training_msgs.update({word_subject: json.loads(clean_json(part.get_payload()))})
+                                    break
                     except:
-                        next    
+                        None
+                        #move email to other inbox
+    old_ids = [idx for idx in old_ids if idx not in remove_ids]    
     return training_msgs
 
 def json_to_cells(json_dic, COL_NAMES, free_row):
@@ -118,27 +145,35 @@ def json_to_cells(json_dic, COL_NAMES, free_row):
             cells.append(Cell(row=i+free_row, col=j+1, value = cell_data)) 
     return cells, rows
 
-def upload_relative_load(wks):
-    wks_dic = wks.get_all_records()
+def upload_relative_load(wks, sh):
+    wks_dic = wks.get_all_records(value_render_option="UNFORMATTED_VALUE")
     # Get max load for each Exercise ID
-    exer_records = {}
-    for wks_row in wks_dic:
-        row_id = wks_row['id']
-        row_load = wks_row['carga']
-        try:
-            if row_load > exer_records[row_id]:
-                exer_records[row_id] = row_load
-        except KeyError:
-            exer_records[row_id] = row_load
+    user_ids = load_user_id(sh)
+    user_exer_records={}
+    for user_id in user_ids:
+        exer_records = {}
+        for wks_row in wks_dic:
+            if user_ids[user_id] == wks_row['usuario']:
+                row_id = wks_row['id']
+                row_load = wks_row['carga']
+                try:
+                    if row_load > exer_records[row_id]:
+                        exer_records[row_id] = row_load
+                except KeyError:
+                    exer_records[row_id] = row_load
+        user_exer_records.update({user_ids[user_id]:exer_records})
     # Compute relative load (normlizing to max -> 100)
     exer_rel_load = []
     for wks_row in wks_dic:
         row_id = wks_row['id']  
+        user = wks_row['usuario']
         row_load = wks_row['carga']
         try:
-            rel_load = int((row_load/exer_records[row_id])*100)
+            rel_load = int((row_load/user_exer_records[user][row_id])*100)
         except:
             rel_load = 0
+        #if row_id==1 and user=="Moi":
+        #    print("loaded load:",row_load,"max load:",user_exer_records[user][row_id],"relative:",rel_load)
         exer_rel_load.append(rel_load)
     # Update values
     log_info("All relative load have been re-computed", tabs=1)
