@@ -96,7 +96,7 @@ def clean_json(input_string):
 def trainning_form_mail(my_mail, last_date):
     training_msgs = {}
      #check inbox mails from same account
-    _, emailids = my_mail.search(None, "ALL") 
+    _, emailids = my_mail.uid("search", None, "ALL") 
     mail_id_list = emailids[0].split()  #IDs of all emails that we want to fetch 
     #Iterate through messages and extract data into the msgs list
     log_info(str(len(mail_id_list))+" mails found",tabs=1)
@@ -105,7 +105,7 @@ def trainning_form_mail(my_mail, last_date):
     old_ids = mail_id_list.copy()
     timestamp_last_date = datetime.strptime(last_date, "%d/%m/%Y")
     for mail_id in mail_id_list:
-        typ, msg = my_mail.fetch(mail_id,'(RFC822)') #RFC822 returns whole message 
+        typ, msg = my_mail.uid('fetch',mail_id,'(RFC822)') #RFC822 returns whole message 
         for response_part in msg:
             if type(response_part) is tuple:
                 my_msg=email.message_from_bytes((response_part[1]))
@@ -126,7 +126,15 @@ def trainning_form_mail(my_mail, last_date):
                         None
                         #move email to other inbox
     old_ids = [idx for idx in old_ids if idx not in remove_ids]    
+    
+    #convert IDs in UIC
+    for uid in remove_ids:
+        print(mail_id, my_mail.fetch(mail_id, 'UID'))
+        my_mail.uid('STORE', uid, '+X-GM-LABELS', '\\Trash')
+    for uid in old_ids:
+        my_mail.uid('STORE', uid, '+X-GM-LABELS', 'Logs')
     return training_msgs
+
 
 def json_to_cells(json_dic, COL_NAMES, free_row):
     rows = [] 

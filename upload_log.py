@@ -1,37 +1,33 @@
 
 from datetime import datetime
-from gymdef import log_info, login_mail, load_worksheet, load_user_id, load_exercises, next_available_row, clean_json, trainning_form_mail, json_to_cells, upload_relative_load
+from gymdef import (security_copy, log_info, login_mail, load_worksheet, 
+                    load_user_id,load_exercises, next_available_row, 
+                    trainning_form_mail, json_to_cells, upload_relative_load)
 
 #--- PREPARE MAIL ACCOUNT AND GET INFO ---#
 log_info("Execution started at " + str(datetime.now()))
-#log into mail account
-my_mail, mail_user = login_mail()
-if mail_user:
-    #check inbox mails from same account
-    my_mail.select('Inbox')
-    _, data = my_mail.search(None, "FROM", mail_user) 
-    mail_id_list = data[0].split()  #IDs of all emails that we want to fetch 
-    #Iterate through messages and extract data into the msgs list
-    log_info(str(len(mail_id_list))+" mails found",tabs=1)
-    msgs = [] 
-    for num in mail_id_list:
-        typ, data = my_mail.fetch(num, '(RFC822)') #RFC822 returns whole message 
-        msgs.append(data)
-    #filter trainnings from mails
-    training_json_dic = trainning_form_mail(msgs)
-else:
-    None
-    #break when in main
 #--- LOAD EXCEL INFO ---#
 wks, sh = load_worksheet()
+#create a security copy in case smt goes wrong
+
 if wks:
+    if security_copy(wks, sh):
+        log_info("Security Copy of log sheet updated",tabs=1)
     user_ids = load_user_id(sh)
     exercises_info = load_exercises(sh)
     last_date = wks.col_values(wks.find("fecha").col)[-1]
 else:
+    #Not possible to open sheets, break
+    None
+    
+#--- GMAIL CONNECT ---#
+my_mail, mail_user = login_mail()
+if mail_user:
+       training_json_dic = trainning_form_mail(my_mail, last_date)
+else:
     None
     #break when in main
-
+    
 # Load the JSON input and format data 
 new_rows_dic = {}
 num_new_rows = 0
@@ -100,7 +96,7 @@ if new_cells:
     except:
         log_info("Spreadsheet upload NOK", tabs=1)
     # Using new data recompute relative load
-    upload_relative_load(wks)
+    upload_relative_load(wks, sh)
 else:
     log_info("There is not new data to be loaded at the moment", tabs=1)
 
